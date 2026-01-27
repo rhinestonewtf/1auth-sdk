@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>1auth SDK Examples</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        max-width: 600px;
+        margin: 40px auto;
+        padding: 0 20px;
+        line-height: 1.6;
+        color: #333;
+      }
+      h1 {
+        border-bottom: 2px solid #eee;
+        padding-bottom: 10px;
+      }
+      ul {
+        list-style: none;
+        padding: 0;
+      }
+      li {
+        margin: 12px 0;
+      }
+      a {
+        color: #0066cc;
+        text-decoration: none;
+        font-size: 18px;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      .description {
+        color: #666;
+        font-size: 14px;
+        margin-left: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>1auth SDK Examples</h1>
+    <p>Simple examples demonstrating how to use the 1auth passkey provider with viem.</p>
+    <ul>
+      <li>
+        <a href="/sign-message.html">Sign Message</a>
+        <span class="description">- Connect wallet and sign a message with personal_sign</span>
+      </li>
+      <li>
+        <a href="/sign-typed-data.html">Sign Typed Data</a>
+        <span class="description">- Sign EIP-712 structured data with eth_signTypedData_v4</span>
+      </li>
+    </ul>
+  </body>
+</html>

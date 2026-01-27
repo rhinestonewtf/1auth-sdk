@@ -34,7 +34,8 @@ export type PasskeyProvider = OneAuthProvider;
 
 export type OneAuthProviderOptions = {
   client: OneAuthClient;
-  chainId: number;
+  /** Chain ID for EIP-1193 compatibility. Optional since 1auth is multi-chain. Defaults to 1 (mainnet). */
+  chainId?: number;
   storageKey?: string;
   waitForHash?: boolean;
   hashTimeoutMs?: number;
@@ -47,11 +48,13 @@ export type PasskeyProviderOptions = OneAuthProviderOptions;
 
 const DEFAULT_STORAGE_KEY = "1auth-user";
 
+const DEFAULT_CHAIN_ID = 1; // Mainnet - for EIP-1193 compat only
+
 export function createOneAuthProvider(
   options: OneAuthProviderOptions
 ): OneAuthProvider {
   const { client } = options;
-  let chainId = options.chainId;
+  let chainId = options.chainId ?? DEFAULT_CHAIN_ID;
   const storageKey = options.storageKey || DEFAULT_STORAGE_KEY;
 
   const listeners = new Map<string, Set<Listener>>();

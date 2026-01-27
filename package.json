@@ -45,6 +45,7 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
+    "dev:examples": "vite --config examples/vite.config.ts",
     "test": "vitest",
     "type-check": "tsc --noEmit"
   },

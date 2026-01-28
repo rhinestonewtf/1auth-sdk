@@ -481,7 +481,8 @@ export class OneAuthClient {
 
     // 2. Show signing modal (no DB storage - data sent via postMessage)
     const dialogUrl = this.getDialogUrl();
-    const signingUrl = `${dialogUrl}/dialog/sign?mode=iframe`;
+    const themeParams = this.getThemeParams();
+    const signingUrl = `${dialogUrl}/dialog/sign?mode=iframe${themeParams ? `&${themeParams}` : ''}`;
     const { dialog, iframe, cleanup } = this.createModalDialog(signingUrl);
 
     // 3. Wait for dialog to signal ready, then send signing data

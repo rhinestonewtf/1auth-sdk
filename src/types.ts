@@ -300,8 +300,8 @@ export interface IntentCall {
 export interface IntentTokenRequest {
   /** Token contract address */
   token: string;
-  /** Amount (as string for serialization) */
-  amount: string;
+  /** Amount in base units (use parseUnits for decimals) */
+  amount: bigint;
 }
 
 /**

@@ -28,6 +28,7 @@ import type {
   SignTypedDataResult,
   IntentHistoryOptions,
   IntentHistoryResult,
+  IntentTokenRequest,
 } from "./types";
 import {
   getChainById,
@@ -421,13 +422,18 @@ export class OneAuthClient {
     // 1. Prepare intent (get quote from orchestrator)
     // If signedIntent is provided, send it directly for signature verification
     // Otherwise, send unsigned request (only works for first-party apps in ALLOWED_ORIGINS)
+    // Convert bigint amounts to strings for API serialization
+    const serializedTokenRequests = options.tokenRequests?.map((r) => ({
+      token: r.token,
+      amount: r.amount.toString(),
+    }));
     let prepareResponse: PrepareIntentResponse;
     try {
       const requestBody = signedIntent || {
         username: options.username,
         targetChain: options.targetChain,
         calls: options.calls,
-        tokenRequests: options.tokenRequests,
+        tokenRequests: serializedTokenRequests,
         sourceAssets: options.sourceAssets,
         clientId: this.config.clientId,
       };
@@ -495,6 +501,7 @@ export class OneAuthClient {
             username,
             accountAddress: prepareResponse.accountAddress,
             originMessages: prepareResponse.originMessages,
+            tokenRequests: serializedTokenRequests,
           }, dialogOrigin);
           resolve();
         }
@@ -570,46 +577,53 @@ export class OneAuthClient {
       };
     }
 
-    // 6. Wait for completion using SDK's waitForExecution via server endpoint
-    const closeOn = options.closeOn || "preconfirmed";
-    const acceptPreconfirmations = closeOn !== "completed";
-
+    // 6. Poll for completion with status updates to dialog
     let finalStatus = executeResponse.status;
     let finalTxHash = executeResponse.transactionHash;
 
     if (finalStatus === "pending") {
-      // Send "processing" status to dialog
-      this.sendTransactionStatus(iframe, "processing");
+      // Send initial pending status to dialog
+      this.sendTransactionStatus(iframe, "pending");
 
-      try {
-        // Use the wait endpoint which uses the SDK's waitForExecution internally
-        // POST with transactionResult is required for actual waiting
-        const waitResponse = await fetch(
-          `${this.config.providerUrl}/api/intent/wait/${executeResponse.intentId}?preconfirm=${acceptPreconfirmations}`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "x-client-id": this.config.clientId,
-            },
-            body: JSON.stringify({
-              transactionResult: executeResponse.transactionResult,
-            }),
+      // Poll status endpoint for updates
+      const maxAttempts = 120; // 3 minutes at 1.5s intervals
+      const pollIntervalMs = 1500;
+      let lastStatus = "pending";
+
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        try {
+          const statusResponse = await fetch(
+            `${this.config.providerUrl}/api/intent/status/${executeResponse.intentId}`,
+            {
+              method: "GET",
+              headers: {
+                "x-client-id": this.config.clientId,
+              },
+            }
+          );
+
+          if (statusResponse.ok) {
+            const statusResult = await statusResponse.json();
+            finalStatus = statusResult.status;
+            finalTxHash = statusResult.transactionHash;
+
+            // Send status update to dialog if changed
+            if (finalStatus !== lastStatus) {
+              this.sendTransactionStatus(iframe, finalStatus, finalTxHash);
+              lastStatus = finalStatus;
+            }
+
+            // Exit if terminal status reached
+            if (finalStatus === "completed" || finalStatus === "failed" || finalStatus === "expired") {
+              break;
+            }
           }
-        );
-
-        if (waitResponse.ok) {
-          const waitResult = await waitResponse.json();
-          finalStatus = waitResult.status === "preconfirmed" || waitResult.status === "completed"
-            ? "completed"
-            : waitResult.status;
-          finalTxHash = waitResult.transactionHash;
-        } else {
-          // Wait failed, keep pending status
-          console.error("Wait endpoint failed:", await waitResponse.text());
+        } catch (pollError) {
+          console.error("Failed to poll intent status:", pollError);
         }
-      } catch (waitError) {
-        console.error("Failed to wait for intent:", waitError);
+
+        // Wait before next poll
+        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
       }
     }
 
@@ -1077,16 +1091,11 @@ export class OneAuthClient {
 
     // Build tokenRequests - tells orchestrator what output token/amount we want
     // The amount parameter now represents OUTPUT (what user wants to receive)
-    // We always specify tokenRequests so the orchestrator knows the desired output
-    let tokenRequests: { token: string; amount: string }[] | undefined;
-    if (!isToNativeEth) {
-      // For non-native output tokens, specify the exact output amount we want
-      tokenRequests = [{
-        token: toTokenAddress,
-        amount: parseUnits(options.amount, toDecimals).toString(),
-      }];
-    }
-    // For native ETH output: orchestrator handles it differently (no tokenRequests needed)
+    // Always specify tokenRequests so the orchestrator knows the desired output and we can show "Buying" in UI
+    const tokenRequests: IntentTokenRequest[] = [{
+      token: toTokenAddress,
+      amount: parseUnits(options.amount, toDecimals),
+    }];
 
     console.log("[SDK sendSwap] Building intent:", {
       isBridge,
@@ -1101,6 +1110,7 @@ export class OneAuthClient {
     // The orchestrator will handle finding the best swap/bridge route
     // For swaps/bridges, we use tokenRequests to specify output
     // We need at least one call (SDK requirement), so we use a minimal placeholder
+    // The label/sublabel tell the dialog what to display (instead of "Send" with unknown address)
     const result = await this.sendIntent({
       username: options.username,
       targetChain: options.targetChain,
@@ -1109,6 +1119,9 @@ export class OneAuthClient {
           // Minimal call - just signals to orchestrator we want the tokenRequests delivered
           to: toTokenAddress,
           value: "0",
+          // SDK provides labels so dialog shows "Buy ETH" not "Send ETH / To: 0x000..."
+          label: `Buy ${toSymbol}`,
+          sublabel: `${options.amount} ${toSymbol}`,
         },
       ],
       // Request specific output tokens - this is what actually matters for swaps

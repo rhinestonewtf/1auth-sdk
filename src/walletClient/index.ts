@@ -244,13 +244,14 @@ export function createPasskeyWalletClient(
      * Send multiple calls as a single batched transaction
      */
     async sendCalls(params: SendCallsParams): Promise<Hash> {
-      const { calls, chainId: targetChain } = params;
+      const { calls, chainId: targetChain, tokenRequests } = params;
       const closeOn = (config.waitForHash ?? true)
         ? "completed"
         : "preconfirmed";
       const intentPayload = await buildIntentPayload(calls, targetChain);
       const result = await provider.sendIntent({
         ...intentPayload,
+        tokenRequests,
         closeOn,
         waitForHash: config.waitForHash ?? true,
         hashTimeoutMs: config.hashTimeoutMs,

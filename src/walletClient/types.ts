@@ -66,6 +66,9 @@ export interface SendCallsParams {
 
   /** Optional chain id override */
   chainId?: number;
+
+  /** Optional token requests for orchestrator output (what tokens/amounts to deliver) */
+  tokenRequests?: { token: string; amount: bigint }[];
 }
 
 /**

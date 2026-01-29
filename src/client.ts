@@ -514,7 +514,7 @@ export class OneAuthClient {
     const signingResult = await this.waitForSigningResponse(dialog, iframe, cleanup);
 
     if (!signingResult.success) {
-      // cleanup already called if user rejected via X button
+      cleanup();
       return {
         success: false,
         intentId: "", // No intentId yet - signing was cancelled before execute
@@ -540,6 +540,8 @@ export class OneAuthClient {
           expiresAt: prepareResponse.expiresAt,
           // Signature from dialog
           signature: signingResult.signature,
+          // Multi-origin signatures for cross-chain intents (one per source chain)
+          originSignatures: signingResult.originSignatures,
           passkey: signingResult.passkey, // Include passkey info for signature encoding
         }),
       });
@@ -764,7 +766,7 @@ export class OneAuthClient {
         }
 
         const message = event.data;
-        const payload = message?.data as { signature?: WebAuthnSignature; passkey?: { credentialId: string; publicKeyX: string; publicKeyY: string }; signedHash?: string } | undefined;
+        const payload = message?.data as { signature?: WebAuthnSignature; originSignatures?: WebAuthnSignature[]; passkey?: { credentialId: string; publicKeyX: string; publicKeyY: string }; signedHash?: string } | undefined;
 
         if (message?.type === "PASSKEY_SIGNING_RESULT") {
           window.removeEventListener("message", handleMessage);
@@ -773,6 +775,7 @@ export class OneAuthClient {
             resolve({
               success: true,
               signature: payload.signature,
+              originSignatures: payload.originSignatures, // Multi-origin signatures for cross-chain
               passkey: payload.passkey,
               signedHash: payload.signedHash,
             });

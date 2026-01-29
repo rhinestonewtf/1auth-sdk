@@ -53,7 +53,7 @@ describe("createPasskeyProvider", () => {
   });
 
   test("wallet_connect authenticates and stores user", async () => {
-    const authWithModal = vi.fn().mockResolvedValue({
+    const connectWithModal = vi.fn().mockResolvedValue({
       success: true,
       username: "alice",
     });
@@ -63,7 +63,8 @@ describe("createPasskeyProvider", () => {
     });
 
     const client = {
-      authWithModal,
+      connectWithModal,
+      authWithModal: vi.fn(),
       getProviderUrl: () => "https://auth.test",
       getClientId: () => "client-id",
     } as unknown as OneAuthClient;
@@ -86,10 +87,11 @@ describe("createPasskeyProvider", () => {
   test("wallet_sendCalls forwards calls to sendIntent", async () => {
     const sendIntent = vi.fn().mockResolvedValue({
       success: true,
-      transactionHash: "0xabc",
+      intentId: "0xabc",
     });
     const client = {
       sendIntent,
+      connectWithModal: vi.fn(),
       authWithModal: vi.fn(),
       getProviderUrl: () => "https://auth.test",
       getClientId: () => "client-id",
@@ -137,10 +139,11 @@ describe("createPasskeyProvider", () => {
     const signIntent = vi.fn().mockResolvedValue(signedIntent);
     const sendIntent = vi.fn().mockResolvedValue({
       success: true,
-      transactionHash: "0xabc",
+      intentId: "0xabc",
     });
     const client = {
       sendIntent,
+      connectWithModal: vi.fn(),
       authWithModal: vi.fn(),
       getProviderUrl: () => "https://auth.test",
       getClientId: () => "client-id",

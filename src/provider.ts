@@ -7,7 +7,7 @@ import {
 } from "viem";
 import { OneAuthClient } from "./client";
 import { getSupportedChainIds } from "./registry";
-import type { IntentCall, IntentSigner } from "./types";
+import type { IntentCall, IntentSigner, IntentTokenRequest } from "./types";
 import { encodeWebAuthnSignature } from "./walletClient/utils";
 
 type ProviderRequest = {
@@ -194,6 +194,22 @@ export function createOneAuthProvider(
     });
   };
 
+  const normalizeTokenRequests = (
+    requests: unknown
+  ): IntentTokenRequest[] | undefined => {
+    if (!Array.isArray(requests)) return undefined;
+    return requests.map((r) => {
+      const req = r as Record<string, unknown>;
+      return {
+        token: req.token as string,
+        amount:
+          typeof req.amount === "bigint"
+            ? req.amount
+            : BigInt(String(req.amount || "0")),
+      };
+    });
+  };
+
   const decodeMessage = (value: string) => {
     if (!isHex(value)) return value;
     try {
@@ -237,12 +253,14 @@ export function createOneAuthProvider(
     accountAddress: Address;
     targetChain: number;
     calls: IntentCall[];
+    tokenRequests?: IntentTokenRequest[];
   }) => {
     if (!options.signIntent) {
       return {
         username: payload.username,
         targetChain: payload.targetChain,
         calls: payload.calls,
+        tokenRequests: payload.tokenRequests,
       };
     }
     const signedIntent = await options.signIntent({
@@ -250,6 +268,7 @@ export function createOneAuthProvider(
       accountAddress: payload.accountAddress,
       targetChain: payload.targetChain,
       calls: payload.calls,
+      tokenRequests: payload.tokenRequests,
     });
     return { signedIntent };
   };
@@ -259,6 +278,7 @@ export function createOneAuthProvider(
     accountAddress: Address;
     targetChain: number;
     calls: IntentCall[];
+    tokenRequests?: IntentTokenRequest[];
   }) => {
     const closeOn = (options.waitForHash ?? true)
       ? "completed"
@@ -266,6 +286,7 @@ export function createOneAuthProvider(
     const intentPayload = await resolveIntentPayload(payload);
     const result = await client.sendIntent({
       ...intentPayload,
+      tokenRequests: payload.tokenRequests,
       closeOn,
       waitForHash: options.waitForHash ?? true,
       hashTimeoutMs: options.hashTimeoutMs,
@@ -340,11 +361,13 @@ export function createOneAuthProvider(
         const user = await ensureUser();
         const targetChain = parseChainId(tx.chainId) ?? chainId;
         const calls = normalizeCalls([tx]);
+        const tokenRequests = normalizeTokenRequests(tx.tokenRequests);
         return sendIntent({
           username: user.username,
           accountAddress: user.address,
           targetChain,
           calls,
+          tokenRequests,
         });
       }
       case "wallet_sendCalls": {
@@ -353,12 +376,14 @@ export function createOneAuthProvider(
         const user = await ensureUser();
         const targetChain = parseChainId(payload.chainId) ?? chainId;
         const calls = normalizeCalls((payload.calls as unknown[]) || []);
+        const tokenRequests = normalizeTokenRequests(payload.tokenRequests);
         if (!calls.length) throw new Error("No calls provided");
         return sendIntent({
           username: user.username,
           accountAddress: user.address,
           targetChain,
           calls,
+          tokenRequests,
         });
       }
       case "wallet_getCapabilities": {

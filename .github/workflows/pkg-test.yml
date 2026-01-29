@@ -45,16 +45,16 @@ jobs:
       - name: Test with ${{ matrix.package-manager }}
         working-directory: /tmp/test-project
         run: |
-          # Initialize project
+          # Initialize project and install package with peer dependencies
           if [ "${{ matrix.package-manager }}" = "yarn" ]; then
             yarn init -y
-            yarn add ./rhinestone-1auth-*.tgz viem@^2.0.0 @wagmi/core@^2.0.0
+            yarn add ./rhinestone-1auth-*.tgz viem@^2.0.0 @wagmi/core@^2.0.0 react@^18.0.0
           elif [ "${{ matrix.package-manager }}" = "pnpm" ]; then
             pnpm init
-            pnpm add ./rhinestone-1auth-*.tgz viem@^2.0.0 @wagmi/core@^2.0.0
+            pnpm add ./rhinestone-1auth-*.tgz viem@^2.0.0 @wagmi/core@^2.0.0 react@^18.0.0
           else
             npm init -y
-            npm install ./rhinestone-1auth-*.tgz viem@^2.0.0 @wagmi/core@^2.0.0
+            npm install ./rhinestone-1auth-*.tgz viem@^2.0.0 @wagmi/core@^2.0.0 react@^18.0.0
           fi
 
       - name: Verify package imports

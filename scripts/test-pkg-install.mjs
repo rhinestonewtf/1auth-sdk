@@ -62,6 +62,19 @@ try {
   errors.push(`Failed to import wagmi entry: ${e.message}`);
 }
 
+// Test react export
+try {
+  const react = await import("@rhinestone/1auth/react");
+
+  if (!("PayButton" in react)) {
+    errors.push('Missing export "PayButton" from react entry');
+  }
+
+  console.log("✓ React export (@rhinestone/1auth/react) - OK");
+} catch (e) {
+  errors.push(`Failed to import react entry: ${e.message}`);
+}
+
 // Summary
 console.log("");
 if (errors.length > 0) {

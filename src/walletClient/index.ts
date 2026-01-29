@@ -104,6 +104,10 @@ export function createPasskeyWalletClient(
       throw new Error(result.error?.message || 'Signing failed');
     }
 
+    if (!result.signature) {
+      throw new Error('No signature received');
+    }
+
     return encodeWebAuthnSignature(result.signature);
   };
 
@@ -130,6 +134,10 @@ export function createPasskeyWalletClient(
       throw new Error(result.error?.message || 'Signing failed');
     }
 
+    if (!result.signature) {
+      throw new Error('No signature received');
+    }
+
     return encodeWebAuthnSignature(result.signature);
   };
 
@@ -154,6 +162,10 @@ export function createPasskeyWalletClient(
 
     if (!result.success) {
       throw new Error(result.error?.message || 'Signing failed');
+    }
+
+    if (!result.signature) {
+      throw new Error('No signature received');
     }
 
     return encodeWebAuthnSignature(result.signature);

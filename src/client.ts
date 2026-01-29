@@ -17,7 +17,7 @@ import type {
   SendIntentOptions,
   SendIntentResult,
   PrepareIntentResponse,
-  ExecuteIntentResponse,
+  IntentStatus,
   WebAuthnSignature,
   SendSwapOptions,
   SendSwapResult,
@@ -503,6 +503,10 @@ export class OneAuthClient {
             accountAddress: prepareResponse.accountAddress,
             originMessages: prepareResponse.originMessages,
             tokenRequests: serializedTokenRequests,
+            // Execute data for dialog to call /api/intent/execute directly
+            intentOp: prepareResponse.intentOp,
+            userId: prepareResponse.userId,
+            expiresAt: prepareResponse.expiresAt,
           }, dialogOrigin);
           resolve();
         }
@@ -511,78 +515,40 @@ export class OneAuthClient {
     });
 
     // 4. Wait for signing result (modal stays open)
+    // Intent is now executed directly in dialog - we receive intentId instead of signature
     const signingResult = await this.waitForSigningResponse(dialog, iframe, cleanup);
 
     if (!signingResult.success) {
       cleanup();
       return {
         success: false,
-        intentId: "", // No intentId yet - signing was cancelled before execute
+        intentId: "",
         status: "failed",
         error: signingResult.error,
       };
     }
 
-    // 5. Execute intent with signature
-    let executeResponse: ExecuteIntentResponse;
-    try {
-      const response = await fetch(`${this.config.providerUrl}/api/intent/execute`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          // Data from prepare response (no intentId yet - created on execute)
-          intentOp: prepareResponse.intentOp,
-          userId: prepareResponse.userId,
-          targetChain: prepareResponse.targetChain,
-          calls: prepareResponse.calls,
-          expiresAt: prepareResponse.expiresAt,
-          // Signature from dialog
-          signature: signingResult.signature,
-          // Multi-origin signatures for cross-chain intents (one per source chain)
-          originSignatures: signingResult.originSignatures,
-          passkey: signingResult.passkey, // Include passkey info for signature encoding
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        // Send failure status to dialog
-        this.sendTransactionStatus(iframe, "failed");
-        // Wait for dialog to close
-        await this.waitForDialogClose(dialog, cleanup);
-        return {
-          success: false,
-          intentId: "", // No intentId - execute failed before creation
-          status: "failed",
-          error: {
-            code: "EXECUTE_FAILED",
-            message: errorData.error || "Failed to execute intent",
-          },
-        };
-      }
-
-      executeResponse = await response.json();
-    } catch (error) {
-      // Send failure status to dialog
-      this.sendTransactionStatus(iframe, "failed");
-      // Wait for dialog to close
-      await this.waitForDialogClose(dialog, cleanup);
+    // 5. Intent was executed in dialog - intentId is now available
+    const intentId = signingResult.intentId;
+    if (!intentId) {
+      cleanup();
       return {
         success: false,
-        intentId: "", // No intentId - network error before creation
+        intentId: "",
         status: "failed",
         error: {
-          code: "NETWORK_ERROR",
-          message: error instanceof Error ? error.message : "Network error",
+          code: "EXECUTE_FAILED" as const,
+          message: "No intentId received from dialog",
         },
       };
     }
 
     // 6. Poll for completion with status updates to dialog
-    let finalStatus = executeResponse.status;
-    let finalTxHash = executeResponse.transactionHash;
+    // Start polling immediately - execute already happened in dialog
+    this.sendTransactionStatus(iframe, "pending");
+
+    let finalStatus: string = "pending";
+    let finalTxHash: string | undefined;
 
     if (finalStatus === "pending") {
       // Send initial pending status to dialog
@@ -596,7 +562,7 @@ export class OneAuthClient {
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         try {
           const statusResponse = await fetch(
-            `${this.config.providerUrl}/api/intent/status/${executeResponse.intentId}`,
+            `${this.config.providerUrl}/api/intent/status/${intentId}`,
             {
               method: "GET",
               headers: {
@@ -638,7 +604,7 @@ export class OneAuthClient {
     await this.waitForDialogClose(dialog, cleanup);
 
     if (options.waitForHash && !finalTxHash) {
-      const hash = await this.waitForTransactionHash(executeResponse.intentId, {
+      const hash = await this.waitForTransactionHash(intentId, {
         timeoutMs: options.hashTimeoutMs,
         intervalMs: options.hashIntervalMs,
       });
@@ -649,10 +615,9 @@ export class OneAuthClient {
         finalStatus = "failed";
         return {
           success: false,
-          intentId: executeResponse.intentId,
-          status: finalStatus,
+          intentId,
+          status: finalStatus as IntentStatus,
           transactionHash: finalTxHash,
-          operationId: executeResponse.operationId,
           error: {
             code: "HASH_TIMEOUT",
             message: "Timed out waiting for transaction hash",
@@ -663,11 +628,9 @@ export class OneAuthClient {
 
     return {
       success: finalStatus === "completed",
-      intentId: executeResponse.intentId,
-      status: finalStatus,
+      intentId,
+      status: finalStatus as IntentStatus,
       transactionHash: finalTxHash,
-      operationId: executeResponse.operationId,
-      error: executeResponse.error,
     };
   }
 
@@ -753,7 +716,7 @@ export class OneAuthClient {
     dialog: HTMLDialogElement,
     _iframe: HTMLIFrameElement,
     cleanup: () => void
-  ): Promise<SigningResult & { signedHash?: string }> {
+  ): Promise<SigningResult & { signedHash?: string; intentId?: string }> {
     const dialogOrigin = this.getDialogOrigin();
     console.log("[SDK] waitForSigningResponse, expecting origin:", dialogOrigin);
 
@@ -766,16 +729,25 @@ export class OneAuthClient {
         }
 
         const message = event.data;
-        const payload = message?.data as { signature?: WebAuthnSignature; originSignatures?: WebAuthnSignature[]; passkey?: { credentialId: string; publicKeyX: string; publicKeyY: string }; signedHash?: string } | undefined;
+        const payload = message?.data as {
+          intentId?: string;  // For intent signing (after execute in dialog)
+          signature?: WebAuthnSignature;  // For message/typedData signing
+          originSignatures?: WebAuthnSignature[];
+          passkey?: { credentialId: string; publicKeyX: string; publicKeyY: string };
+          signedHash?: string;
+          error?: string;
+        } | undefined;
 
         if (message?.type === "PASSKEY_SIGNING_RESULT") {
           window.removeEventListener("message", handleMessage);
 
-          if (message.success && payload?.signature) {
+          // Check for intentId (intent signing) OR signature (message/typedData signing)
+          if (message.success && (payload?.intentId || payload?.signature)) {
             resolve({
               success: true,
-              signature: payload.signature,
-              originSignatures: payload.originSignatures, // Multi-origin signatures for cross-chain
+              intentId: payload.intentId,  // Present if intent signing
+              signature: payload.signature,  // Present if message/typedData signing
+              originSignatures: payload.originSignatures,
               passkey: payload.passkey,
               signedHash: payload.signedHash,
             });
@@ -784,7 +756,7 @@ export class OneAuthClient {
               success: false,
               error: message.error || {
                 code: "SIGNING_FAILED" as SigningErrorCode,
-                message: "Signing failed",
+                message: payload?.error || "Signing failed",
               },
             });
           }

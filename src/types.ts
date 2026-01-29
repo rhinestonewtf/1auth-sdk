@@ -227,10 +227,14 @@ export interface PasskeyCredentials {
 export interface SigningSuccess {
   success: true;
   requestId?: string; // Optional - not used when data is passed via postMessage
-  signature: WebAuthnSignature;
+  /** WebAuthn signature - present for message/typedData signing */
+  signature?: WebAuthnSignature;
   /** Array of signatures for multi-origin cross-chain intents (one per source chain) */
   originSignatures?: WebAuthnSignature[];
-  passkey?: PasskeyCredentials; // Credentials of the passkey used for signing
+  /** Credentials of the passkey used for signing - present for message/typedData signing */
+  passkey?: PasskeyCredentials;
+  /** Intent ID - present for intent signing (after execute in dialog) */
+  intentId?: string;
 }
 
 export type SigningErrorCode =

@@ -228,6 +228,8 @@ export interface SigningSuccess {
   success: true;
   requestId?: string; // Optional - not used when data is passed via postMessage
   signature: WebAuthnSignature;
+  /** Array of signatures for multi-origin cross-chain intents (one per source chain) */
+  originSignatures?: WebAuthnSignature[];
   passkey?: PasskeyCredentials; // Credentials of the passkey used for signing
 }
 

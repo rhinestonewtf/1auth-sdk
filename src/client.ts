@@ -1907,15 +1907,36 @@ export class OneAuthClient {
 
   private waitForModalAuthResponse(
     _dialog: HTMLDialogElement,
-    _iframe: HTMLIFrameElement,
+    iframe: HTMLIFrameElement,
     cleanup: () => void
   ): Promise<LoginResult | RegisterResult> {
     const dialogOrigin = this.getDialogOrigin();
     return new Promise((resolve) => {
+      // Track whether the dialog has signaled ready
+      // This prevents stale PASSKEY_CLOSE messages from previous dialogs
+      let dialogReady = false;
+
       const handleMessage = (event: MessageEvent) => {
         if (event.origin !== dialogOrigin) return;
 
         const data = event.data;
+
+        // Wait for dialog to signal ready before processing other messages
+        if (data?.type === "PASSKEY_READY") {
+          dialogReady = true;
+          // Send init message to the auth dialog
+          iframe.contentWindow?.postMessage({
+            type: "PASSKEY_INIT",
+            mode: "iframe",
+          }, dialogOrigin);
+          return;
+        }
+
+        // Ignore messages until dialog is ready (prevents stale CLOSE from previous dialogs)
+        if (!dialogReady && data?.type === "PASSKEY_CLOSE") {
+          return;
+        }
+
         if (data?.type === "PASSKEY_LOGIN_RESULT") {
           window.removeEventListener("message", handleMessage);
           cleanup();

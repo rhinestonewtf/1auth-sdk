@@ -428,16 +428,18 @@ export class OneAuthClient {
       amount: r.amount.toString(),
     }));
     let prepareResponse: PrepareIntentResponse;
-    try {
-      const requestBody = signedIntent || {
-        username: options.username,
-        targetChain: options.targetChain,
-        calls: options.calls,
-        tokenRequests: serializedTokenRequests,
-        sourceAssets: options.sourceAssets,
-        clientId: this.config.clientId,
-      };
+    // Define requestBody outside try block so it's accessible for quote refresh
+    const requestBody = signedIntent || {
+      username: options.username,
+      targetChain: options.targetChain,
+      calls: options.calls,
+      tokenRequests: serializedTokenRequests,
+      sourceAssets: options.sourceAssets,
+      sourceChainId: options.sourceChainId,
+      clientId: this.config.clientId,
+    };
 
+    try {
       const response = await fetch(`${this.config.providerUrl}/api/intent/prepare`, {
         method: "POST",
         headers: {
@@ -503,6 +505,9 @@ export class OneAuthClient {
             accountAddress: prepareResponse.accountAddress,
             originMessages: prepareResponse.originMessages,
             tokenRequests: serializedTokenRequests,
+            expiresAt: prepareResponse.expiresAt,
+            userId: prepareResponse.userId,
+            intentOp: prepareResponse.intentOp,
           }, dialogOrigin);
           resolve();
         }
@@ -510,8 +515,45 @@ export class OneAuthClient {
       window.addEventListener("message", handleReady);
     });
 
-    // 4. Wait for signing result (modal stays open)
-    const signingResult = await this.waitForSigningResponse(dialog, iframe, cleanup);
+    // 4. Wait for signing result with auto-refresh support
+    // This custom handler handles both signing results AND quote refresh requests
+    const signingResult = await this.waitForSigningWithRefresh(
+      dialog,
+      iframe,
+      cleanup,
+      dialogOrigin,
+      // Refresh callback - called when dialog requests a quote refresh
+      async () => {
+        console.log("[SDK] Dialog requested quote refresh, re-preparing intent");
+        try {
+          const refreshResponse = await fetch(`${this.config.providerUrl}/api/intent/prepare`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(requestBody),
+            credentials: "include",
+          });
+
+          if (!refreshResponse.ok) {
+            console.error("[SDK] Quote refresh failed:", await refreshResponse.text());
+            return null;
+          }
+
+          const refreshedData = await refreshResponse.json();
+          // Update prepareResponse with refreshed data for execute step
+          prepareResponse = refreshedData;
+          return {
+            intentOp: refreshedData.intentOp,
+            expiresAt: refreshedData.expiresAt,
+            challenge: refreshedData.challenge,
+            originMessages: refreshedData.originMessages,
+            transaction: refreshedData.transaction,
+          };
+        } catch (error) {
+          console.error("[SDK] Quote refresh error:", error);
+          return null;
+        }
+      }
+    );
 
     if (!signingResult.success) {
       // cleanup already called if user rejected via X button
@@ -523,59 +565,74 @@ export class OneAuthClient {
       };
     }
 
-    // 5. Execute intent with signature
-    let executeResponse: ExecuteIntentResponse;
-    try {
-      const response = await fetch(`${this.config.providerUrl}/api/intent/execute`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          // Data from prepare response (no intentId yet - created on execute)
-          intentOp: prepareResponse.intentOp,
-          userId: prepareResponse.userId,
-          targetChain: prepareResponse.targetChain,
-          calls: prepareResponse.calls,
-          expiresAt: prepareResponse.expiresAt,
-          // Signature from dialog
-          signature: signingResult.signature,
-          passkey: signingResult.passkey, // Include passkey info for signature encoding
-        }),
-      });
+    // Check if dialog already executed the intent (new secure flow)
+    // In this case, signingResult contains intentId instead of signature
+    const dialogExecutedIntent = "intentId" in signingResult && signingResult.intentId;
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
+    // 5. Execute intent with signature (skip if dialog already executed)
+    let executeResponse: ExecuteIntentResponse;
+
+    if (dialogExecutedIntent) {
+      // Dialog already executed - use the returned intentId
+      executeResponse = {
+        success: true,
+        intentId: signingResult.intentId as string,
+        status: "pending",
+      };
+    } else {
+      // Legacy flow - execute with signature from dialog
+      try {
+        const response = await fetch(`${this.config.providerUrl}/api/intent/execute`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            // Data from prepare response (no intentId yet - created on execute)
+            intentOp: prepareResponse.intentOp,
+            userId: prepareResponse.userId,
+            targetChain: prepareResponse.targetChain,
+            calls: prepareResponse.calls,
+            expiresAt: prepareResponse.expiresAt,
+            // Signature from dialog
+            signature: signingResult.signature,
+            passkey: signingResult.passkey, // Include passkey info for signature encoding
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          // Send failure status to dialog
+          this.sendTransactionStatus(iframe, "failed");
+          // Wait for dialog to close
+          await this.waitForDialogClose(dialog, cleanup);
+          return {
+            success: false,
+            intentId: "", // No intentId - execute failed before creation
+            status: "failed",
+            error: {
+              code: "EXECUTE_FAILED",
+              message: errorData.error || "Failed to execute intent",
+            },
+          };
+        }
+
+        executeResponse = await response.json();
+      } catch (error) {
         // Send failure status to dialog
         this.sendTransactionStatus(iframe, "failed");
         // Wait for dialog to close
         await this.waitForDialogClose(dialog, cleanup);
         return {
           success: false,
-          intentId: "", // No intentId - execute failed before creation
+          intentId: "", // No intentId - network error before creation
           status: "failed",
           error: {
-            code: "EXECUTE_FAILED",
-            message: errorData.error || "Failed to execute intent",
+            code: "NETWORK_ERROR",
+            message: error instanceof Error ? error.message : "Network error",
           },
         };
       }
-
-      executeResponse = await response.json();
-    } catch (error) {
-      // Send failure status to dialog
-      this.sendTransactionStatus(iframe, "failed");
-      // Wait for dialog to close
-      await this.waitForDialogClose(dialog, cleanup);
-      return {
-        success: false,
-        intentId: "", // No intentId - network error before creation
-        status: "failed",
-        error: {
-          code: "NETWORK_ERROR",
-          message: error instanceof Error ? error.message : "Network error",
-        },
-      };
     }
 
     // 6. Poll for completion with status updates to dialog
@@ -764,12 +821,115 @@ export class OneAuthClient {
         }
 
         const message = event.data;
-        const payload = message?.data as { signature?: WebAuthnSignature; passkey?: { credentialId: string; publicKeyX: string; publicKeyY: string }; signedHash?: string } | undefined;
+        const payload = message?.data as { signature?: WebAuthnSignature; passkey?: { credentialId: string; publicKeyX: string; publicKeyY: string }; signedHash?: string; intentId?: string } | undefined;
 
         if (message?.type === "PASSKEY_SIGNING_RESULT") {
           window.removeEventListener("message", handleMessage);
 
-          if (message.success && payload?.signature) {
+          // Check if dialog already executed the intent (new secure flow)
+          if (message.success && payload?.intentId) {
+            resolve({
+              success: true,
+              intentId: payload.intentId,
+            } as SigningResult & { signedHash?: string; intentId?: string });
+          } else if (message.success && payload?.signature) {
+            // Legacy flow - dialog returns signature for SDK to execute
+            resolve({
+              success: true,
+              signature: payload.signature,
+              passkey: payload.passkey,
+              signedHash: payload.signedHash,
+            });
+          } else {
+            resolve({
+              success: false,
+              error: message.error || {
+                code: "SIGNING_FAILED" as SigningErrorCode,
+                message: "Signing failed",
+              },
+            });
+          }
+        } else if (message?.type === "PASSKEY_CLOSE") {
+          window.removeEventListener("message", handleMessage);
+          cleanup();
+          resolve({
+            success: false,
+            error: {
+              code: "USER_REJECTED" as SigningErrorCode,
+              message: "User closed the dialog",
+            },
+          });
+        }
+      };
+
+      window.addEventListener("message", handleMessage);
+    });
+  }
+
+  /**
+   * Wait for signing result with auto-refresh support
+   * This method handles both signing results and quote refresh requests from the dialog
+   */
+  private waitForSigningWithRefresh(
+    dialog: HTMLDialogElement,
+    iframe: HTMLIFrameElement,
+    cleanup: () => void,
+    dialogOrigin: string,
+    onRefresh: () => Promise<{
+      intentOp: string;
+      expiresAt: string;
+      challenge: string;
+      originMessages?: Array<{ chainId: number; hash: string }>;
+      transaction?: unknown;
+    } | null>
+  ): Promise<SigningResult & { signedHash?: string }> {
+    console.log("[SDK] waitForSigningWithRefresh, expecting origin:", dialogOrigin);
+
+    return new Promise((resolve) => {
+      const handleMessage = async (event: MessageEvent) => {
+        if (event.origin !== dialogOrigin) return;
+
+        const message = event.data;
+
+        // Handle quote refresh request from dialog
+        if (message?.type === "PASSKEY_REFRESH_QUOTE") {
+          console.log("[SDK] Received quote refresh request from dialog");
+          const refreshedData = await onRefresh();
+
+          if (refreshedData) {
+            // Send refreshed quote data to dialog
+            iframe.contentWindow?.postMessage({
+              type: "PASSKEY_REFRESH_COMPLETE",
+              ...refreshedData,
+            }, dialogOrigin);
+          } else {
+            // Send error if refresh failed
+            iframe.contentWindow?.postMessage({
+              type: "PASSKEY_REFRESH_ERROR",
+              error: "Failed to refresh quote",
+            }, dialogOrigin);
+          }
+          return;
+        }
+
+        const payload = message?.data as {
+          signature?: WebAuthnSignature;
+          passkey?: { credentialId: string; publicKeyX: string; publicKeyY: string };
+          signedHash?: string;
+          intentId?: string;
+        } | undefined;
+
+        if (message?.type === "PASSKEY_SIGNING_RESULT") {
+          window.removeEventListener("message", handleMessage);
+
+          // Check if dialog already executed the intent (new secure flow)
+          if (message.success && payload?.intentId) {
+            resolve({
+              success: true,
+              intentId: payload.intentId,
+            } as SigningResult & { signedHash?: string; intentId?: string });
+          } else if (message.success && payload?.signature) {
+            // Legacy flow - dialog returns signature for SDK to execute
             resolve({
               success: true,
               signature: payload.signature,
@@ -1131,6 +1291,8 @@ export class OneAuthClient {
       // This ensures the swap uses the correct source token
       // Pass the symbol (not address) so orchestrator can resolve per-chain
       sourceAssets: options.sourceAssets || [options.fromToken.toUpperCase()],
+      // Pass source chain ID so orchestrator knows which chain to look for tokens on
+      sourceChainId: options.sourceChainId,
       closeOn: options.closeOn || "preconfirmed",
       waitForHash: options.waitForHash,
       hashTimeoutMs: options.hashTimeoutMs,

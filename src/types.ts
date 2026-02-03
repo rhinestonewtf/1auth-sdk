@@ -363,6 +363,12 @@ export interface SendIntentOptions {
    * Example: ['USDC'] or ['0x...'] to only use USDC as input.
    */
   sourceAssets?: string[];
+  /**
+   * Source chain ID for the assets.
+   * When specified with sourceAssets containing addresses, tells orchestrator
+   * which chain to look for those tokens on.
+   */
+  sourceChainId?: number;
   /** When to close the dialog and return success. Defaults to "preconfirmed" */
   closeOn?: CloseOnStatus;
   /**
@@ -520,6 +526,11 @@ export interface SendSwapOptions {
    * This constrains which tokens the orchestrator can use as input.
    */
   sourceAssets?: string[];
+  /**
+   * Source chain ID for the assets. When specified, the orchestrator will only
+   * look for source assets on this specific chain.
+   */
+  sourceChainId?: number;
   /** When to close the dialog. Defaults to "preconfirmed" */
   closeOn?: CloseOnStatus;
   /** Wait for a transaction hash before resolving. */

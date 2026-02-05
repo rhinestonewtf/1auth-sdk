@@ -86,12 +86,11 @@ export function createOneAuthProvider(
   };
 
   const resolveAccountAddress = async (username: string): Promise<Address> => {
+    const clientId = client.getClientId();
     const response = await fetch(
       `${client.getProviderUrl()}/api/users/${encodeURIComponent(username)}/account`,
       {
-        headers: {
-          "x-client-id": client.getClientId(),
-        },
+        headers: clientId ? { "x-client-id": clientId } : {},
       }
     );
 
@@ -413,12 +412,11 @@ export function createOneAuthProvider(
       }
       case "wallet_getAssets": {
         const { username } = await ensureUser();
+        const clientId = client.getClientId();
         const response = await fetch(
           `${client.getProviderUrl()}/api/users/${encodeURIComponent(username)}/portfolio`,
           {
-            headers: {
-              "x-client-id": client.getClientId(),
-            },
+            headers: clientId ? { "x-client-id": clientId } : {},
           }
         );
         if (!response.ok) {
@@ -433,12 +431,11 @@ export function createOneAuthProvider(
         if (!callsId) {
           throw new Error("callsId is required");
         }
+        const statusClientId = client.getClientId();
         const response = await fetch(
           `${client.getProviderUrl()}/api/intent/status/${encodeURIComponent(callsId)}`,
           {
-            headers: {
-              "x-client-id": client.getClientId(),
-            },
+            headers: statusClientId ? { "x-client-id": statusClientId } : {},
           }
         );
         if (!response.ok) {
@@ -490,10 +487,9 @@ export function createOneAuthProvider(
           queryParams.toString() ? `?${queryParams}` : ""
         }`;
 
+        const historyClientId = client.getClientId();
         const response = await fetch(url, {
-          headers: {
-            "x-client-id": client.getClientId(),
-          },
+          headers: historyClientId ? { "x-client-id": historyClientId } : {},
           credentials: "include",
         });
 

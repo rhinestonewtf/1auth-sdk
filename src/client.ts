@@ -116,7 +116,7 @@ export class OneAuthClient {
   /**
    * Get the configured client ID
    */
-  getClientId(): string {
+  getClientId(): string | undefined {
     return this.config.clientId;
   }
 
@@ -133,9 +133,9 @@ export class OneAuthClient {
         const response = await fetch(
           `${this.config.providerUrl}/api/intent/status/${intentId}`,
           {
-            headers: {
-              "x-client-id": this.config.clientId,
-            },
+            headers: this.config.clientId
+              ? { "x-client-id": this.config.clientId }
+              : {},
           }
         );
         if (response.ok) {
@@ -167,9 +167,11 @@ export class OneAuthClient {
   }): Promise<LoginResult | RegisterResult> {
     const dialogUrl = this.getDialogUrl();
     const params = new URLSearchParams({
-      clientId: this.config.clientId,
       mode: 'iframe',
     });
+    if (this.config.clientId) {
+      params.set('clientId', this.config.clientId);
+    }
     if (options?.username) {
       params.set('username', options.username);
     }
@@ -218,9 +220,11 @@ export class OneAuthClient {
   }): Promise<ConnectResult> {
     const dialogUrl = this.getDialogUrl();
     const params = new URLSearchParams({
-      clientId: this.config.clientId,
       mode: 'iframe',
     });
+    if (this.config.clientId) {
+      params.set('clientId', this.config.clientId);
+    }
 
     // Add theme params
     const themeParams = this.getThemeParams(options?.theme);
@@ -288,9 +292,11 @@ export class OneAuthClient {
   async authenticate(options?: AuthenticateOptions & { theme?: ThemeConfig }): Promise<AuthenticateResult> {
     const dialogUrl = this.getDialogUrl();
     const params = new URLSearchParams({
-      clientId: this.config.clientId,
       mode: 'iframe',
     });
+    if (this.config.clientId) {
+      params.set('clientId', this.config.clientId);
+    }
 
     if (options?.challenge) {
       params.set('challenge', options.challenge);
@@ -436,7 +442,7 @@ export class OneAuthClient {
       tokenRequests: serializedTokenRequests,
       sourceAssets: options.sourceAssets,
       sourceChainId: options.sourceChainId,
-      clientId: this.config.clientId,
+      ...(this.config.clientId && { clientId: this.config.clientId }),
     };
 
     try {
@@ -654,9 +660,9 @@ export class OneAuthClient {
             `${this.config.providerUrl}/api/intent/status/${executeResponse.intentId}`,
             {
               method: "GET",
-              headers: {
-                "x-client-id": this.config.clientId,
-              },
+              headers: this.config.clientId
+                ? { "x-client-id": this.config.clientId }
+                : {},
             }
           );
 
@@ -1006,9 +1012,9 @@ export class OneAuthClient {
       const response = await fetch(
         `${this.config.providerUrl}/api/intent/status/${intentId}`,
         {
-          headers: {
-            "x-client-id": this.config.clientId,
-          },
+          headers: this.config.clientId
+            ? { "x-client-id": this.config.clientId }
+            : {},
         }
       );
 
@@ -1080,9 +1086,9 @@ export class OneAuthClient {
     }`;
 
     const response = await fetch(url, {
-      headers: {
-        "x-client-id": this.config.clientId,
-      },
+      headers: this.config.clientId
+        ? { "x-client-id": this.config.clientId }
+        : {},
       credentials: "include",
     });
 
@@ -1681,9 +1687,9 @@ export class OneAuthClient {
     const response = await fetch(
       `${this.config.providerUrl}/api/users/${encodeURIComponent(username)}/passkeys`,
       {
-        headers: {
-          "x-client-id": this.config.clientId,
-        },
+        headers: this.config.clientId
+          ? { "x-client-id": this.config.clientId }
+          : {},
       }
     );
 
@@ -1709,7 +1715,7 @@ export class OneAuthClient {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          clientId: this.config.clientId,
+          ...(this.config.clientId && { clientId: this.config.clientId }),
           username: options.username,
           challenge: options.challenge,
           description: options.description,
@@ -1976,7 +1982,7 @@ export class OneAuthClient {
 
           // Get the current dialog URL and switch to popup mode
           const popupUrl = data.data?.url?.replace("mode=iframe", "mode=popup")
-            || `${this.getDialogUrl()}/dialog/auth?mode=popup&clientId=${this.config.clientId}`;
+            || `${this.getDialogUrl()}/dialog/auth?mode=popup${this.config.clientId ? `&clientId=${this.config.clientId}` : ''}`;
 
           // Open popup and wait for result
           this.waitForPopupAuthResponse(popupUrl).then(resolve);
@@ -2282,9 +2288,9 @@ export class OneAuthClient {
     const response = await fetch(
       `${this.config.providerUrl}/api/sign/request/${requestId}`,
       {
-        headers: {
-          "x-client-id": this.config.clientId,
-        },
+        headers: this.config.clientId
+          ? { "x-client-id": this.config.clientId }
+          : {},
       }
     );
 

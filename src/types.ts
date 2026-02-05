@@ -11,8 +11,8 @@ export interface ThemeConfig {
 export interface PasskeyProviderConfig {
   /** Base URL of the auth API. Defaults to https://passkey.1auth.box */
   providerUrl?: string;
-  /** Client identifier for this application */
-  clientId: string;
+  /** Client identifier for this application (optional for development) */
+  clientId?: string;
   /** Optional redirect URL for redirect flow */
   redirectUrl?: string;
   /** Optional URL of the dialog UI. Defaults to providerUrl */

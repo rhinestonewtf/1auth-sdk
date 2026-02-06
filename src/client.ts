@@ -678,7 +678,17 @@ export class OneAuthClient {
             }
 
             // Exit if terminal status reached
-            if (finalStatus === "completed" || finalStatus === "failed" || finalStatus === "expired") {
+            // closeOn determines when to consider the intent successful (default: preconfirmed)
+            const closeOn = options.closeOn || "preconfirmed";
+            const successStatuses: Record<string, string[]> = {
+              claimed: ["claimed", "preconfirmed", "filled", "completed"],
+              preconfirmed: ["preconfirmed", "filled", "completed"],
+              filled: ["filled", "completed"],
+              completed: ["completed"],
+            };
+            const isTerminal = finalStatus === "failed" || finalStatus === "expired";
+            const isSuccess = successStatuses[closeOn]?.includes(finalStatus) ?? false;
+            if (isTerminal || isSuccess) {
               break;
             }
           }
@@ -692,7 +702,16 @@ export class OneAuthClient {
     }
 
     // 7. Send final status to dialog
-    const displayStatus = finalStatus === "completed" ? "confirmed" : finalStatus;
+    // Map successful statuses to "confirmed" based on closeOn setting
+    const closeOn = options.closeOn || "preconfirmed";
+    const successStatuses: Record<string, string[]> = {
+      claimed: ["claimed", "preconfirmed", "filled", "completed"],
+      preconfirmed: ["preconfirmed", "filled", "completed"],
+      filled: ["filled", "completed"],
+      completed: ["completed"],
+    };
+    const isSuccessStatus = successStatuses[closeOn]?.includes(finalStatus) ?? false;
+    const displayStatus = isSuccessStatus ? "confirmed" : finalStatus;
     this.sendTransactionStatus(iframe, displayStatus, finalTxHash);
 
     // Wait for dialog to be closed by user

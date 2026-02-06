@@ -7,7 +7,7 @@ import {
 } from "viem";
 import { OneAuthClient } from "./client";
 import { getSupportedChainIds } from "./registry";
-import type { IntentCall, IntentSigner, IntentTokenRequest } from "./types";
+import type { CloseOnStatus, IntentCall, IntentSigner, IntentTokenRequest } from "./types";
 import { encodeWebAuthnSignature } from "./walletClient/utils";
 
 type ProviderRequest = {
@@ -36,6 +36,8 @@ export type OneAuthProviderOptions = {
   client: OneAuthClient;
   chainId: number;
   storageKey?: string;
+  /** When to close the dialog and return success. Defaults to "preconfirmed" */
+  closeOn?: CloseOnStatus;
   waitForHash?: boolean;
   hashTimeoutMs?: number;
   hashIntervalMs?: number;
@@ -279,9 +281,8 @@ export function createOneAuthProvider(
     calls: IntentCall[];
     tokenRequests?: IntentTokenRequest[];
   }) => {
-    const closeOn = (options.waitForHash ?? true)
-      ? "completed"
-      : "preconfirmed";
+    // Use explicit closeOn if provided, otherwise default based on waitForHash
+    const closeOn = options.closeOn ?? ((options.waitForHash ?? true) ? "completed" : "preconfirmed");
     const intentPayload = await resolveIntentPayload(payload);
     const result = await client.sendIntent({
       ...intentPayload,

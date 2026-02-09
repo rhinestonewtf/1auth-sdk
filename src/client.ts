@@ -742,7 +742,7 @@ export class OneAuthClient {
     }
 
     return {
-      success: finalStatus === "completed",
+      success: isSuccessStatus,
       intentId: executeResponse.intentId,
       status: finalStatus,
       transactionHash: finalTxHash,

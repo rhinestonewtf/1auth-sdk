@@ -698,3 +698,101 @@ export interface IntentHistoryResult {
   /** Whether there are more intents beyond this page */
   hasMore: boolean;
 }
+
+// Batch intent types
+
+/**
+ * A single intent within a batch
+ */
+export interface BatchIntentItem {
+  /** Target chain ID */
+  targetChain: number;
+  /** Calls to execute on the target chain */
+  calls: IntentCall[];
+  /** Optional token requests */
+  tokenRequests?: IntentTokenRequest[];
+  /** Constrain which tokens can be used as input */
+  sourceAssets?: string[];
+  /** Source chain ID for the assets */
+  sourceChainId?: number;
+}
+
+/**
+ * Options for sendBatchIntent
+ */
+export interface SendBatchIntentOptions {
+  /** Username of the signer */
+  username: string;
+  /** Array of intents to execute as a batch */
+  intents: BatchIntentItem[];
+  /** When to close the dialog for each intent. Defaults to "preconfirmed" */
+  closeOn?: CloseOnStatus;
+}
+
+/**
+ * Result for a single intent within a batch
+ */
+export interface BatchIntentItemResult {
+  /** Index in the original batch */
+  index: number;
+  /** Whether this intent succeeded */
+  success: boolean;
+  /** Intent ID from orchestrator */
+  intentId: string;
+  /** Current status */
+  status: IntentStatus;
+  /** Error details if failed */
+  error?: { code: string; message: string };
+}
+
+/**
+ * Result of sendBatchIntent
+ */
+export interface SendBatchIntentResult {
+  /** Whether ALL intents succeeded */
+  success: boolean;
+  /** Per-intent results */
+  results: BatchIntentItemResult[];
+  /** Count of successful intents */
+  successCount: number;
+  /** Count of failed intents */
+  failureCount: number;
+}
+
+/**
+ * Prepared intent data within a batch response
+ */
+export interface PreparedBatchIntent {
+  /** Index in the original batch */
+  index: number;
+  /** Quote from orchestrator */
+  quote: IntentQuote;
+  /** Decoded transaction details for UI */
+  transaction: TransactionDetails;
+  /** Serialized PreparedTransactionData from orchestrator */
+  intentOp: string;
+  /** Expiry for this specific intent */
+  expiresAt: string;
+  /** Target chain ID */
+  targetChain: number;
+  /** JSON stringified calls */
+  calls: string;
+  /** Origin message hashes for this intent */
+  originMessages: Array<{ chainId: number; messageHash: string }>;
+}
+
+/**
+ * Prepare batch intent response from auth service
+ */
+export interface PrepareBatchIntentResponse {
+  /** Per-intent prepared data */
+  intents: PreparedBatchIntent[];
+  /** Shared challenge (merkle root of ALL origin hashes across ALL intents) */
+  challenge: string;
+  /** User ID */
+  userId: string;
+  /** Account address */
+  accountAddress?: string;
+  /** Global expiry (earliest of all intent expiries) */
+  expiresAt: string;
+}

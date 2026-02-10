@@ -29,6 +29,10 @@ import type {
   IntentHistoryOptions,
   IntentHistoryResult,
   IntentTokenRequest,
+  SendBatchIntentOptions,
+  SendBatchIntentResult,
+  PrepareBatchIntentResponse,
+  BatchIntentItemResult,
 } from "./types";
 import {
   getChainById,
@@ -749,6 +753,240 @@ export class OneAuthClient {
       operationId: executeResponse.operationId,
       error: executeResponse.error,
     };
+  }
+
+  /**
+   * Send a batch of intents for multi-chain execution with a single passkey tap.
+   *
+   * This method prepares multiple intents, shows a paginated review,
+   * and signs all intents with a single passkey tap via a shared merkle tree.
+   *
+   * @example
+   * ```typescript
+   * const result = await client.sendBatchIntent({
+   *   username: 'alice',
+   *   intents: [
+   *     {
+   *       targetChain: 8453, // Base
+   *       calls: [{ to: '0x...', data: '0x...', label: 'Swap on Base' }],
+   *     },
+   *     {
+   *       targetChain: 42161, // Arbitrum
+   *       calls: [{ to: '0x...', data: '0x...', label: 'Mint on Arbitrum' }],
+   *     },
+   *   ],
+   * });
+   *
+   * if (result.success) {
+   *   console.log(`${result.successCount} intents submitted`);
+   * }
+   * ```
+   */
+  async sendBatchIntent(options: SendBatchIntentOptions): Promise<SendBatchIntentResult> {
+    if (!options.username) {
+      return {
+        success: false,
+        results: [],
+        successCount: 0,
+        failureCount: 0,
+      };
+    }
+
+    if (!options.intents?.length) {
+      return {
+        success: false,
+        results: [],
+        successCount: 0,
+        failureCount: 0,
+      };
+    }
+
+    // Serialize token request amounts to strings for API
+    const serializedIntents = options.intents.map((intent) => ({
+      targetChain: intent.targetChain,
+      calls: intent.calls,
+      tokenRequests: intent.tokenRequests?.map((r) => ({
+        token: r.token,
+        amount: r.amount.toString(),
+      })),
+      sourceAssets: intent.sourceAssets,
+      sourceChainId: intent.sourceChainId,
+    }));
+
+    const requestBody = {
+      username: options.username,
+      intents: serializedIntents,
+      ...(this.config.clientId && { clientId: this.config.clientId }),
+    };
+
+    // 1. Prepare batch (get quotes for all intents, compute shared merkle root)
+    let prepareResponse: PrepareBatchIntentResponse;
+    try {
+      const response = await fetch(`${this.config.providerUrl}/api/intent/batch-prepare`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        const errorMessage = errorData.error || "Failed to prepare batch intent";
+
+        if (errorMessage.includes("User not found")) {
+          localStorage.removeItem("1auth-user");
+        }
+
+        return {
+          success: false,
+          results: [],
+          successCount: 0,
+          failureCount: 0,
+        };
+      }
+
+      prepareResponse = await response.json();
+    } catch {
+      return {
+        success: false,
+        results: [],
+        successCount: 0,
+        failureCount: 0,
+      };
+    }
+
+    // 2. Open signing dialog
+    const dialogUrl = this.getDialogUrl();
+    const themeParams = this.getThemeParams();
+    const signingUrl = `${dialogUrl}/dialog/sign?mode=iframe${themeParams ? `&${themeParams}` : ''}`;
+    const { dialog, iframe, cleanup } = this.createModalDialog(signingUrl);
+
+    // 3. Wait for dialog ready, send batch data via PASSKEY_INIT
+    const dialogOrigin = this.getDialogOrigin();
+    await new Promise<void>((resolve) => {
+      const handleReady = (event: MessageEvent) => {
+        if (event.origin !== dialogOrigin) return;
+        if (event.data?.type === "PASSKEY_READY") {
+          window.removeEventListener("message", handleReady);
+          iframe.contentWindow?.postMessage({
+            type: "PASSKEY_INIT",
+            mode: "iframe",
+            batchMode: true,
+            batchIntents: prepareResponse.intents,
+            challenge: prepareResponse.challenge,
+            username: options.username,
+            accountAddress: prepareResponse.accountAddress,
+            userId: prepareResponse.userId,
+            expiresAt: prepareResponse.expiresAt,
+          }, dialogOrigin);
+          resolve();
+        }
+      };
+      window.addEventListener("message", handleReady);
+    });
+
+    // 4. Wait for batch signing result with auto-refresh support
+    const batchResult = await new Promise<SendBatchIntentResult>((resolve) => {
+      const handleMessage = async (event: MessageEvent) => {
+        if (event.origin !== dialogOrigin) return;
+
+        const message = event.data;
+
+        // Handle quote refresh request
+        if (message?.type === "PASSKEY_REFRESH_QUOTE") {
+          console.log("[SDK] Batch dialog requested quote refresh, re-preparing all intents");
+          try {
+            const refreshResponse = await fetch(`${this.config.providerUrl}/api/intent/batch-prepare`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(requestBody),
+            });
+
+            if (refreshResponse.ok) {
+              const refreshed: PrepareBatchIntentResponse = await refreshResponse.json();
+              prepareResponse = refreshed;
+              iframe.contentWindow?.postMessage({
+                type: "PASSKEY_REFRESH_COMPLETE",
+                batchIntents: refreshed.intents,
+                challenge: refreshed.challenge,
+                expiresAt: refreshed.expiresAt,
+              }, dialogOrigin);
+            } else {
+              iframe.contentWindow?.postMessage({
+                type: "PASSKEY_REFRESH_ERROR",
+                error: "Failed to refresh batch quotes",
+              }, dialogOrigin);
+            }
+          } catch {
+            iframe.contentWindow?.postMessage({
+              type: "PASSKEY_REFRESH_ERROR",
+              error: "Failed to refresh batch quotes",
+            }, dialogOrigin);
+          }
+          return;
+        }
+
+        // Handle signing result with batch results
+        if (message?.type === "PASSKEY_SIGNING_RESULT") {
+          window.removeEventListener("message", handleMessage);
+
+          if (message.success && message.data?.batchResults) {
+            const rawResults: Array<{
+              index: number;
+              operationId?: string;
+              intentId?: string;
+              status: string;
+              error?: string;
+              success?: boolean;
+            }> = message.data.batchResults;
+
+            const results: BatchIntentItemResult[] = rawResults.map((r) => ({
+              index: r.index,
+              success: r.success ?? r.status !== "FAILED",
+              intentId: r.intentId || r.operationId || "",
+              status: r.status === "FAILED" ? "failed" : "pending",
+              error: r.error ? { code: "EXECUTE_FAILED", message: r.error } : undefined,
+            }));
+
+            const successCount = results.filter((r) => r.success).length;
+
+            // Wait for user to close dialog
+            await this.waitForDialogClose(dialog, cleanup);
+
+            resolve({
+              success: successCount === results.length,
+              results,
+              successCount,
+              failureCount: results.length - successCount,
+            });
+          } else {
+            // Signing failed or was cancelled
+            cleanup();
+            resolve({
+              success: false,
+              results: [],
+              successCount: 0,
+              failureCount: 0,
+            });
+          }
+        }
+
+        // Handle dialog close
+        if (message?.type === "PASSKEY_CLOSE") {
+          window.removeEventListener("message", handleMessage);
+          cleanup();
+          resolve({
+            success: false,
+            results: [],
+            successCount: 0,
+            failureCount: 0,
+          });
+        }
+      };
+
+      window.addEventListener("message", handleMessage);
+    });
+
+    return batchResult;
   }
 
   /**

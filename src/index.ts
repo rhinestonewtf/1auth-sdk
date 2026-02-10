@@ -68,6 +68,13 @@ export type {
   SwapQuote,
   // Theme configuration
   ThemeConfig,
+  // Batch intent types
+  BatchIntentItem,
+  SendBatchIntentOptions,
+  SendBatchIntentResult,
+  BatchIntentItemResult,
+  PreparedBatchIntent,
+  PrepareBatchIntentResponse,
 } from "./types";
 
 // Viem WalletClient integration

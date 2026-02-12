@@ -241,22 +241,16 @@ export class OneAuthClient {
 
     const { dialog, iframe, cleanup } = this.createModalDialog(url);
 
-    // Wait for dialog to signal ready, then send init message
-    const dialogOrigin = this.getDialogOrigin();
-    await new Promise<void>((resolve) => {
-      const handleReady = (event: MessageEvent) => {
-        if (event.origin !== dialogOrigin) return;
-        if (event.data?.type === "PASSKEY_READY") {
-          window.removeEventListener("message", handleReady);
-          iframe.contentWindow?.postMessage({
-            type: "PASSKEY_INIT",
-            mode: "iframe",
-          }, dialogOrigin);
-          resolve();
-        }
-      };
-      window.addEventListener("message", handleReady);
+    const ready = await this.waitForDialogReady(dialog, iframe, cleanup, {
+      mode: "iframe",
     });
+    if (!ready) {
+      return {
+        success: false,
+        action: "cancel",
+        error: { code: "USER_CANCELLED", message: "Connection was cancelled" },
+      };
+    }
 
     return this.waitForConnectResponse(dialog, iframe, cleanup);
   }
@@ -330,22 +324,23 @@ export class OneAuthClient {
 
     const { dialog, iframe, cleanup } = this.createModalDialog(signingUrl);
 
-    // Send signing data via postMessage after iframe loads
-    const dialogOrigin = this.getDialogOrigin();
-    await new Promise<void>((resolve) => {
-      iframe.onload = () => {
-        iframe.contentWindow?.postMessage({
-          type: "PASSKEY_INIT",
-          mode: "iframe",
-          challenge: options.challenge,
-          username: options.username,
-          description: options.description,
-          transaction: options.transaction,
-          metadata: options.metadata,
-        }, dialogOrigin);
-        resolve();
-      };
+    const ready = await this.waitForDialogReady(dialog, iframe, cleanup, {
+      mode: "iframe",
+      challenge: options.challenge,
+      username: options.username,
+      description: options.description,
+      transaction: options.transaction,
+      metadata: options.metadata,
     });
+    if (!ready) {
+      return {
+        success: false,
+        error: {
+          code: "USER_REJECTED" as SigningErrorCode,
+          message: "User closed the dialog",
+        },
+      };
+    }
 
     return this.waitForSigningResponse(dialog, iframe, cleanup);
   }
@@ -499,31 +494,28 @@ export class OneAuthClient {
 
     // 3. Wait for dialog to signal ready, then send signing data
     const dialogOrigin = this.getDialogOrigin();
-    await new Promise<void>((resolve) => {
-      const handleReady = (event: MessageEvent) => {
-        if (event.origin !== dialogOrigin) return;
-        if (event.data?.type === "PASSKEY_READY") {
-          window.removeEventListener("message", handleReady);
-          iframe.contentWindow?.postMessage({
-            type: "PASSKEY_INIT",
-            mode: "iframe",
-            calls,
-            chainId: targetChain,
-            transaction: prepareResponse.transaction,
-            challenge: prepareResponse.challenge,
-            username,
-            accountAddress: prepareResponse.accountAddress,
-            originMessages: prepareResponse.originMessages,
-            tokenRequests: serializedTokenRequests,
-            expiresAt: prepareResponse.expiresAt,
-            userId: prepareResponse.userId,
-            intentOp: prepareResponse.intentOp,
-          }, dialogOrigin);
-          resolve();
-        }
-      };
-      window.addEventListener("message", handleReady);
+    const ready = await this.waitForDialogReady(dialog, iframe, cleanup, {
+      mode: "iframe",
+      calls,
+      chainId: targetChain,
+      transaction: prepareResponse.transaction,
+      challenge: prepareResponse.challenge,
+      username,
+      accountAddress: prepareResponse.accountAddress,
+      originMessages: prepareResponse.originMessages,
+      tokenRequests: serializedTokenRequests,
+      expiresAt: prepareResponse.expiresAt,
+      userId: prepareResponse.userId,
+      intentOp: prepareResponse.intentOp,
     });
+    if (!ready) {
+      return {
+        success: false,
+        intentId: "",
+        status: "failed" as const,
+        error: { code: "USER_CANCELLED", message: "User closed the dialog" },
+      };
+    }
 
     // 4. Wait for signing result with auto-refresh support
     // This custom handler handles both signing results AND quote refresh requests
@@ -862,27 +854,24 @@ export class OneAuthClient {
 
     // 3. Wait for dialog ready, send batch data via PASSKEY_INIT
     const dialogOrigin = this.getDialogOrigin();
-    await new Promise<void>((resolve) => {
-      const handleReady = (event: MessageEvent) => {
-        if (event.origin !== dialogOrigin) return;
-        if (event.data?.type === "PASSKEY_READY") {
-          window.removeEventListener("message", handleReady);
-          iframe.contentWindow?.postMessage({
-            type: "PASSKEY_INIT",
-            mode: "iframe",
-            batchMode: true,
-            batchIntents: prepareResponse.intents,
-            challenge: prepareResponse.challenge,
-            username: options.username,
-            accountAddress: prepareResponse.accountAddress,
-            userId: prepareResponse.userId,
-            expiresAt: prepareResponse.expiresAt,
-          }, dialogOrigin);
-          resolve();
-        }
-      };
-      window.addEventListener("message", handleReady);
+    const ready = await this.waitForDialogReady(dialog, iframe, cleanup, {
+      mode: "iframe",
+      batchMode: true,
+      batchIntents: prepareResponse.intents,
+      challenge: prepareResponse.challenge,
+      username: options.username,
+      accountAddress: prepareResponse.accountAddress,
+      userId: prepareResponse.userId,
+      expiresAt: prepareResponse.expiresAt,
     });
+    if (!ready) {
+      return {
+        success: false,
+        results: [],
+        successCount: 0,
+        failureCount: 0,
+      };
+    }
 
     // 4. Wait for batch signing result with auto-refresh support
     const batchResult = await new Promise<SendBatchIntentResult>((resolve) => {
@@ -1612,27 +1601,23 @@ export class OneAuthClient {
 
     const { dialog, iframe, cleanup } = this.createModalDialog(signingUrl);
 
-    // Wait for dialog to signal ready, then send message signing data
-    const dialogOrigin = this.getDialogOrigin();
-    await new Promise<void>((resolve) => {
-      const handleReady = (event: MessageEvent) => {
-        if (event.origin !== dialogOrigin) return;
-        if (event.data?.type === "PASSKEY_READY") {
-          window.removeEventListener("message", handleReady);
-          iframe.contentWindow?.postMessage({
-            type: "PASSKEY_INIT",
-            mode: "iframe",
-            message: options.message,
-            challenge: options.challenge || options.message,
-            username: options.username,
-            description: options.description,
-            metadata: options.metadata,
-          }, dialogOrigin);
-          resolve();
-        }
-      };
-      window.addEventListener("message", handleReady);
+    const ready = await this.waitForDialogReady(dialog, iframe, cleanup, {
+      mode: "iframe",
+      message: options.message,
+      challenge: options.challenge || options.message,
+      username: options.username,
+      description: options.description,
+      metadata: options.metadata,
     });
+    if (!ready) {
+      return {
+        success: false,
+        error: {
+          code: "USER_REJECTED" as SigningErrorCode,
+          message: "User closed the dialog",
+        },
+      };
+    }
 
     const signingResult = await this.waitForSigningResponse(dialog, iframe, cleanup);
 
@@ -1711,32 +1696,28 @@ export class OneAuthClient {
 
     const { dialog, iframe, cleanup } = this.createModalDialog(signingUrl);
 
-    // Wait for dialog to signal ready, then send typed data
-    const dialogOrigin = this.getDialogOrigin();
-    await new Promise<void>((resolve) => {
-      const handleReady = (event: MessageEvent) => {
-        if (event.origin !== dialogOrigin) return;
-        if (event.data?.type === "PASSKEY_READY") {
-          window.removeEventListener("message", handleReady);
-          iframe.contentWindow?.postMessage({
-            type: "PASSKEY_INIT",
-            mode: "iframe",
-            signingMode: "typedData",
-            typedData: {
-              domain: options.domain,
-              types: options.types,
-              primaryType: options.primaryType,
-              message: options.message,
-            },
-            challenge: signedHash,
-            username: options.username,
-            description: options.description,
-          }, dialogOrigin);
-          resolve();
-        }
-      };
-      window.addEventListener("message", handleReady);
+    const ready = await this.waitForDialogReady(dialog, iframe, cleanup, {
+      mode: "iframe",
+      signingMode: "typedData",
+      typedData: {
+        domain: options.domain,
+        types: options.types,
+        primaryType: options.primaryType,
+        message: options.message,
+      },
+      challenge: signedHash,
+      username: options.username,
+      description: options.description,
     });
+    if (!ready) {
+      return {
+        success: false,
+        error: {
+          code: "USER_REJECTED" as SigningErrorCode,
+          message: "User closed the dialog",
+        },
+      };
+    }
 
     const signingResult = await this.waitForSigningResponse(dialog, iframe, cleanup);
 
@@ -2001,6 +1982,55 @@ export class OneAuthClient {
       "passkey-signing",
       `width=${POPUP_WIDTH},height=${POPUP_HEIGHT},left=${left},top=${top},popup=true`
     );
+  }
+
+  /**
+   * Wait for the dialog iframe to signal ready, then send init data.
+   * Also handles early close (X button, escape, backdrop) during the ready phase.
+   * Returns true if dialog is ready, false if it was closed before becoming ready.
+   */
+  private waitForDialogReady(
+    dialog: HTMLDialogElement,
+    iframe: HTMLIFrameElement,
+    cleanup: () => void,
+    initMessage: Record<string, unknown>,
+  ): Promise<boolean> {
+    const dialogOrigin = this.getDialogOrigin();
+    return new Promise((resolve) => {
+      let settled = false;
+
+      const teardown = () => {
+        if (settled) return;
+        settled = true;
+        window.removeEventListener("message", handleMessage);
+        dialog.removeEventListener("close", handleClose);
+      };
+
+      const handleMessage = (event: MessageEvent) => {
+        if (event.origin !== dialogOrigin) return;
+        if (event.data?.type === "PASSKEY_READY") {
+          teardown();
+          iframe.contentWindow?.postMessage({
+            type: "PASSKEY_INIT",
+            ...initMessage,
+          }, dialogOrigin);
+          resolve(true);
+        } else if (event.data?.type === "PASSKEY_CLOSE") {
+          teardown();
+          cleanup();
+          resolve(false);
+        }
+      };
+
+      // Handle escape key / backdrop click which call cleanup() -> dialog.close()
+      const handleClose = () => {
+        teardown();
+        resolve(false);
+      };
+
+      window.addEventListener("message", handleMessage);
+      dialog.addEventListener("close", handleClose);
+    });
   }
 
   /**

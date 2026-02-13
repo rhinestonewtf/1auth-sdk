@@ -522,8 +522,8 @@ export interface SendSwapOptions {
   username: string;
   /** Target chain ID where swap executes */
   targetChain: number;
-  /** Token to swap from (address or supported symbol like 'ETH', 'USDC') */
-  fromToken: string;
+  /** Token to swap from (address or supported symbol like 'ETH', 'USDC'). Omit to let the orchestrator pick. */
+  fromToken?: string;
   /** Token to swap to (address or supported symbol) */
   toToken: string;
   /** Amount to swap in human-readable format (e.g., "0.1") */
@@ -554,8 +554,8 @@ export interface SendSwapOptions {
  * Quote information from DEX aggregator
  */
 export interface SwapQuote {
-  /** Token being sold */
-  fromToken: string;
+  /** Token being sold (undefined when orchestrator picks) */
+  fromToken?: string;
   /** Token being bought */
   toToken: string;
   /** Amount of fromToken being sold */

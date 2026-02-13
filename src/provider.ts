@@ -280,6 +280,7 @@ export function createOneAuthProvider(
     targetChain: number;
     calls: IntentCall[];
     tokenRequests?: IntentTokenRequest[];
+    sourceChainId?: number;
   }) => {
     // Use explicit closeOn if provided, otherwise default based on waitForHash
     const closeOn = options.closeOn ?? ((options.waitForHash ?? true) ? "completed" : "preconfirmed");
@@ -287,6 +288,7 @@ export function createOneAuthProvider(
     const result = await client.sendIntent({
       ...intentPayload,
       tokenRequests: payload.tokenRequests,
+      sourceChainId: payload.sourceChainId,
       closeOn,
       waitForHash: options.waitForHash ?? true,
       hashTimeoutMs: options.hashTimeoutMs,
@@ -362,12 +364,14 @@ export function createOneAuthProvider(
         const targetChain = parseChainId(tx.chainId) ?? chainId;
         const calls = normalizeCalls([tx]);
         const tokenRequests = normalizeTokenRequests(tx.tokenRequests);
+        const txSourceChainId = parseChainId(tx.sourceChainId);
         return sendIntent({
           username: user.username,
           accountAddress: user.address,
           targetChain,
           calls,
           tokenRequests,
+          sourceChainId: txSourceChainId,
         });
       }
       case "wallet_sendCalls": {
@@ -377,6 +381,7 @@ export function createOneAuthProvider(
         const targetChain = parseChainId(payload.chainId) ?? chainId;
         const calls = normalizeCalls((payload.calls as unknown[]) || []);
         const tokenRequests = normalizeTokenRequests(payload.tokenRequests);
+        const sourceChainId = parseChainId(payload.sourceChainId);
         if (!calls.length) throw new Error("No calls provided");
         return sendIntent({
           username: user.username,
@@ -384,6 +389,7 @@ export function createOneAuthProvider(
           targetChain,
           calls,
           tokenRequests,
+          sourceChainId,
         });
       }
       case "wallet_getCapabilities": {

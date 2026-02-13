@@ -137,7 +137,14 @@ export function resolveTokenAddress(token: string, chainId: number): Address {
   if (isAddress(token)) {
     return token;
   }
-  return getTokenAddress(token.toUpperCase() as never, chainId);
+  // Case-insensitive lookup: find canonical symbol from registry, then resolve
+  const match = getSupportedTokens(chainId).find(
+    (t) => t.symbol.toUpperCase() === token.toUpperCase()
+  );
+  if (!match) {
+    return getTokenAddress(token as never, chainId);
+  }
+  return match.address;
 }
 
 export function isTestnet(chainId: number): boolean {
